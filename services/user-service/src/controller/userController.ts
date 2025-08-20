@@ -1,17 +1,43 @@
 import type { Request, Response } from "express";
-import userModel from "../models/userModel.js"; // Prisma User client
+import userModel from "../models/userModel.js";
 import { generateToken } from "../utils/jwt.js";
 import { hashPassword, comparePassword } from "../utils/password.js";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { z } from 'zod';
+
+// Validation Schemas
+const registerSchema = z.object({
+  name: z.string().min(3, 'Name must be at least 3 characters').max(100),
+  email: z.string().email('Invalid email'),
+  password: z.string().min(8, 'Password must be at least 8 characters')
+});
+
+const loginSchema = z.object({
+  email: z.string().email('Invalid email'),
+  password: z.string().min(1, 'Password is required')
+});
+
+const idParamSchema = z.object({
+  id: z.string().uuid('Invalid user id')
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  email: z.string().email('Invalid email').optional(),
+  password: z.string().min(8, 'Password must be at least 8 characters').optional()
+}).refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one field is required to update',
+});
 
 export const registerUser = async (req: Request, res: Response) => {
-  const { name, email, password } = req.body;
-
-  if (!name || !email || !password) {
-    return res
-      .status(400)
-      .json({ message: "Please enter all fields: name and email." });
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: 'Validation failed',
+      errors: parsed.error.flatten()
+    });
   }
+  const { name, email, password } = parsed.data;
 
   try {
     const userExists = await userModel.findUnique({
@@ -62,13 +88,14 @@ export const registerUser = async (req: Request, res: Response) => {
 };
 
 export const loginUser = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res
-      .status(400)
-      .json({ message: "Please enter all fields: email and password." });
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: 'Validation failed',
+      errors: parsed.error.flatten()
+    });
   }
+  const { email, password } = parsed.data;
 
   try {
     const user = await userModel.findUnique({
@@ -123,7 +150,11 @@ export const getAllUsers = async (req: Request, res: Response) => {
 
 export const getUserById = async (req: Request, res: Response) => {
   try {
-    const userId = req.params.id as string;
+    const params = idParamSchema.safeParse(req.params);
+    if (!params.success) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const userId = params.data.id;
     const user = await userModel.findUnique({
       where: { id: userId },
       select: {
@@ -147,8 +178,19 @@ export const getUserById = async (req: Request, res: Response) => {
 
 export const updateUser = async (req: Request, res: Response) => {
   try {
-    const userIdToUpdate = req.params.id as string;
-    const { name, email, password } = req.body;
+    const params = idParamSchema.safeParse(req.params);
+    if (!params.success) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const userIdToUpdate = params.data.id;
+    const body = updateSchema.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: body.error.flatten()
+      });
+    }
+    const { name, email, password } = body.data;
 
     if (!req.user || req.user.id !== userIdToUpdate) {
       return res
@@ -156,13 +198,15 @@ export const updateUser = async (req: Request, res: Response) => {
         .json({ message: "Forbidden: You can only update your own profile." });
     }
 
-    const userExists = await userModel.findUnique({
-      where: { email: email },
-    });
-    if (userExists && userExists.id !== userIdToUpdate) {
-      return res
-        .status(400)
-        .json({ message: "User with this email already exists." });
+    if (email) {
+      const userExists = await userModel.findUnique({
+        where: { email: email },
+      });
+      if (userExists && userExists.id !== userIdToUpdate) {
+        return res
+          .status(400)
+          .json({ message: "User with this email already exists." });
+      }
     }
 
     const updateData: { name?: string; email?: string; password?: string } = {};
@@ -207,7 +251,11 @@ export const updateUser = async (req: Request, res: Response) => {
 
 export const deleteUser = async (req: Request, res: Response) => {
   try {
-    const userIdToDelete = req.params.id as string;
+    const params = idParamSchema.safeParse(req.params);
+    if (!params.success) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const userIdToDelete = params.data.id;
 
     if (!req.user || req.user.id !== userIdToDelete) {
       return res
@@ -220,7 +268,7 @@ export const deleteUser = async (req: Request, res: Response) => {
     });
 
     console.log(`User deleted: ID ${userIdToDelete}`);
-    res.status(204).send();
+    res.status(204).json({ message: "User deleted successfully." });
   } catch (error: any) {
     console.error("Error deleting user:", error.message);
     if (
