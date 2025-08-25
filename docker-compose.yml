@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  # user_service:
+  #   build: ./user-service
+  #   ports:
+  #     - "3000:3000"
+  #   env_file:
+  #     - ./services/user-service/.env
+  #   networks:
+  #     - microservice_network
+
+  # order_service:
+  #   build: ./order-service
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - ./services/order-service/.env
+  #   networks:
+  #     - microservice_network
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./serivces/nginx/api-gateway.conf:/etc/nginx/conf.d/api-gateway.conf:ro
+    # depends_on:
+    #   - user_service
+    #   - order_service
+    networks:
+      - microservice_network
+
+volumes:
+  postgres_user_data:
+  postgres_order_data:
+
+networks:
+  microservice_network:
+    driver: bridge

@@ -4,6 +4,7 @@ import { generateToken } from "../utils/jwt.js";
 import { hashPassword, comparePassword } from "../utils/password.js";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { z } from 'zod';
+import { verifyToken } from "../utils/jwt.js";
 
 // Validation Schemas
 const registerSchema = z.object({
@@ -127,6 +128,46 @@ export const loginUser = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Error logging in user:", error.message);
     res.status(500).json({ message: "Server error during login." });
+  }
+};
+
+export const validateToken = async (req: Request, res: Response) => {
+  let token: string | undefined;
+
+  // Extract token from Authorization header
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return res.status(401).json({ message: 'Authentication token missing.' });
+  }
+
+  try {
+    const decoded = verifyToken(token);
+
+    if (!decoded || !decoded.id) {
+      return res.status(403).json({ message: 'Invalid or expired token.' });
+    }
+
+    // Optionally, check if the user still exists in the DB
+    const user = await userModel.findUnique({
+      where: { id: decoded.id },
+      select: { id: true } // Only fetch ID to keep it lightweight
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found for this token.' });
+    }
+
+    // If valid, set the X-User-Id header for Nginx to capture
+    res.set('X-User-Id', user.id);
+    // Return 200 OK with minimal body, Nginx only cares about the status and headers
+    res.status(200).json({ message: 'Token is valid.' });
+
+  } catch (error: any) {
+    console.error('Token validation failed:', error.message);
+    return res.status(403).json({ message: 'Invalid or expired token.' });
   }
 };
 
